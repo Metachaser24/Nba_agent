@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, Security, Depends
+from fastapi import FastAPI, HTTPException, Security, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 import dateparser
 import httpx
 import re
+from fastapi.responses import HTMLResponse
 
 # At the top of the file, after imports
 logging.basicConfig(level=logging.INFO)
@@ -549,6 +550,11 @@ async def nba_agent(
             data={"error": str(e), "request_id": request.request_id}
         )
         return AgentResponse(success=False)
+
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    with open("templates/index.html") as f:
+        return HTMLResponse(content=f.read())
 
 if __name__ == "__main__":
     import uvicorn
