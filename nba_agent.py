@@ -52,7 +52,7 @@ supabase: Client = create_client(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://nbaagent-production.up.railway.app"],
+    allow_origins=["https://nbaagent-production.up.railway.app", "http://localhost:8001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

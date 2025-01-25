@@ -231,6 +231,7 @@
     </div>
 
     <script>
+        const API_URL = window.location.origin + '/api/nba_agent';
         const messagesContainer = document.getElementById('chat-messages');
         const userInput = document.getElementById('user-input');
 
@@ -311,27 +312,31 @@
         }
 
         async function sendMessage() {
-            const message = userInput.value.trim();
-            if (!message) return;
+            const userInput = document.getElementById('user-input').value;
+            if (!userInput.trim()) return;
 
-            addMessage(message, true);
+            addMessage(userInput, true);
             userInput.value = '';
             showLoadingIndicator();
 
             try {
-                const response = await fetch('http://localhost:8001/api/nba_agent', {
+                const response = await fetch(API_URL, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': 'Bearer test123'
+                        'Authorization': 'Bearer ' + 'your-bearer-token'
                     },
                     body: JSON.stringify({
-                        query: message,
-                        user_id: 'web-user',
+                        query: userInput,
+                        user_id: 'test-user',
                         request_id: Date.now().toString(),
-                        session_id: 'web-session'
+                        session_id: 'test-session'
                     })
                 });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
 
                 const data = await response.json();
                 console.log('Backend Response:', data);
