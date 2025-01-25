@@ -52,7 +52,7 @@ supabase: Client = create_client(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://nbaagent-production.up.railway.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -542,14 +542,10 @@ async def nba_agent(
 
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}", exc_info=True)
-        # Store error message in conversation
-        await store_message(
-            session_id=request.session_id,
-            message_type="ai",
-            content="I apologize, but I encountered an error processing your request.",
-            data={"error": str(e), "request_id": request.request_id}
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
         )
-        return AgentResponse(success=False)
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
