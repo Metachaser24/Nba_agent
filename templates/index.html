@@ -232,6 +232,7 @@
 
     <script>
         const API_URL = window.location.origin + '/api/nba_agent';
+        const API_TOKEN = 'test123'; 
         const messagesContainer = document.getElementById('chat-messages');
         const userInput = document.getElementById('user-input');
 
@@ -324,7 +325,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + 'your-bearer-token'
+                        'Authorization': `Bearer ${API_TOKEN}`  // Make sure this matches exactly
                     },
                     body: JSON.stringify({
                         query: userInput,
@@ -335,7 +336,8 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.detail || 'Unknown error'}`);
                 }
 
                 const data = await response.json();
