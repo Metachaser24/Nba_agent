@@ -256,11 +256,16 @@
                     const matchup = matchupMatch ? `🏀 ${matchupMatch[0]}` : '';
 
                     if (matchup && predictionPart.includes("Winner:")) {
-                        const spreadMatch = predictionPart.match(/📊 (.*?) ([+-]?\d+\.?\d*)/);
-                        const overUnderMatch = predictionPart.match(/📈 ([OU]) (\d+\.?\d*)/);
+                        const bettingLinesSection = predictionPart.split("Betting Lines:")[1] || '';
+                        const lines = bettingLinesSection.trim().split('\n');
                         
-                        const spread = spreadMatch ? `${spreadMatch[1]} ${spreadMatch[2]}` : '';
-                        const overUnder = overUnderMatch ? `${overUnderMatch[1]} ${overUnderMatch[2]}` : '';
+                        let spread = '';
+                        let overUnder = '';
+                        
+                        if (lines.length >= 2) {
+                            spread = lines[0].trim();
+                            overUnder = lines[1].trim();
+                        }
 
                         allPredictions += `
                             <div class="prediction-card">
@@ -269,11 +274,13 @@
                                     <div class="winner"><strong>Winner:</strong> ${predictionPart.match(/Winner: (.*?)(?:\n|$)/)?.[1] || ''}</div>
                                     <div class="analysis"><strong>Analysis:</strong> ${predictionPart.match(/Analysis: (.*?)(?:\n|$)/)?.[1] || ''}</div>
                                     <div class="confidence"><strong>Confidence:</strong> ${predictionPart.match(/Confidence: (.*?)(?:\n|$)/)?.[1] || ''}</div>
-                                    <div class="betting-lines">
-                                        <div class="betting-header">Betting Lines:</div>
-                                        ${spread ? `<div class="spread-pill">📊 ${spread}</div>` : ''}
-                                        ${overUnder ? `<div class="over-under-pill">📈 ${overUnder}</div>` : ''}
-                                    </div>
+                                    ${bettingLinesSection ? `
+                                        <div class="betting-lines">
+                                            <div class="betting-header">Betting Lines:</div>
+                                            ${spread ? `<div class="spread-pill">${spread}</div>` : ''}
+                                            ${overUnder ? `<div class="over-under-pill">${overUnder}</div>` : ''}
+                                        </div>
+                                    ` : ''}
                                 </div>
                             </div>
                         `;

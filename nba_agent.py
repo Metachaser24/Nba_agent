@@ -76,6 +76,131 @@ class NBAPredictor:
         self.api_key = os.getenv("BALLDONTLIE_API_KEY")
         self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+    def _get_current_nba_season(self) -> int:
+        """
+        Get the NBA season based on the game date.
+        For the 2023-24 season, use 2023.
+        """
+        return 2023  # Hardcode to 2023 for now since that's what the API expects
+
+    async def _is_notable_player(self, player: Dict) -> bool:
+        """Determine if a player is notable based on various factors."""
+        try:
+            # Get player's season averages
+            season_stats = await self._get_season_averages(player['id'])
+            
+            if season_stats:
+                # Consider a player notable if they meet any of these criteria
+                return any([
+                    season_stats.get('pts', 0) >= 10,  # Scores 10+ PPG
+                    season_stats.get('reb', 0) >= 5,   # 5+ RPG
+                    season_stats.get('ast', 0) >= 4,   # 4+ APG
+                    season_stats.get('min', '0') >= '20'  # Plays 20+ minutes
+                ])
+            
+            return False
+        except Exception as e:
+            logger.error(f"Error checking if player is notable: {str(e)}")
+            return False
+
+    async def _get_season_averages(self, player_id: int) -> Dict:
+        """Get player's season averages for the current season."""
+        current_season = 2024  # NBA season 2024-25
+        url = f"{self.base_url}/season_averages"
+        params = {
+            "season": current_season,
+            "player_ids[]": [player_id]  # API expects array of player IDs
+        }
+        headers = {"Authorization": self.api_key}
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, params=params, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                return data['data'][0] if data.get('data') else {}
+        except Exception as e:
+            logger.error(f"Error fetching season averages: {str(e)}")
+            return {}
+
+    async def _get_advanced_stats(self, player_id: int, season: int) -> Dict:
+        """Get player's advanced stats."""
+        url = f"{self.base_url}/stats/advanced"
+        params = {
+            "player_ids[]": [player_id],
+            "seasons[]": [season],
+            "per_page": 100
+        }
+        headers = {"Authorization": self.api_key}
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, params=params, headers=headers)
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching advanced stats: {str(e)}")
+            return {}
+
+    async def _get_team_standings(self, player_id: int) -> Dict:
+        """Get current team standings."""
+        url = f"{self.base_url}/standings"
+        params = {"season": 2023}
+        headers = {"Authorization": self.api_key}
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, params=params, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                
+                # Convert list to dictionary with team_id as key
+                standings_dict = {}
+                for team in data.get('data', []):
+                    if team['team']['id'] == player_id:
+                        standings_dict[player_id] = {
+                            'wins': team.get('wins', 0),
+                            'losses': team.get('losses', 0),
+                            'conference': team.get('conference', 'N/A'),
+                            'conference_rank': team.get('conference_rank', 'N/A'),
+                            'home_record': f"{team.get('home_wins', 0)}-{team.get('home_losses', 0)}",
+                            'road_record': f"{team.get('road_wins', 0)}-{team.get('road_losses', 0)}",
+                            'last_ten': f"{team.get('last_ten_wins', 0)}-{team.get('last_ten_losses', 0)}",
+                            'streak': f"{'W' if team.get('streak_type') == 'win' else 'L'}{team.get('streak', 0)}"
+                        }
+                return standings_dict
+                
+        except Exception as e:
+            logger.error(f"Error fetching standings: {str(e)}")
+            return {}
+
+    async def _get_team_leaders(self, team_id: int, season: int) -> Dict:
+        """Get team statistical leaders."""
+        url = f"{self.base_url}/leaders"
+        stats = ['pts', 'reb', 'ast', 'stl', 'blk']
+        leaders = {}
+        
+        for stat in stats:
+            params = {
+                "season": season,
+                "stat_type": stat
+            }
+            headers = {"Authorization": self.api_key}
+            
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, params=params, headers=headers)
+                    response.raise_for_status()
+                    data = response.json()
+                    # Filter for team's leaders
+                    team_leaders = [p for p in data['data'] if p['player']['team_id'] == team_id]
+                    if team_leaders:
+                        leaders[stat] = team_leaders[0]
+            except Exception as e:
+                logger.error(f"Error fetching {stat} leaders: {str(e)}")
+        
+        return leaders
+
     async def get_games(self, date: str) -> List[Dict]:
         """Fetch games for a specific date"""
         logger.info(f"Fetching games for date: {date}")
@@ -107,26 +232,33 @@ class NBAPredictor:
             logger.error(f"Error fetching injuries: {str(e)}")
             return []
 
-    async def get_standings(self, season: int) -> Dict[int, Dict]:
-        """Fetch standings for the current season"""
+    async def get_standings(self, season: int = 2023) -> Dict:
+        """Get current standings."""
         url = f"{self.base_url}/standings"
-        headers = {'Authorization': self.api_key}
-        params = {'season': season}
+        params = {"season": season}
+        headers = {"Authorization": self.api_key}
         
         try:
-            response = requests.get(url, headers=headers, params=params)
-            response.raise_for_status()
-            standings_data = response.json()['data']
-            
-            return {
-                standing['team']['id']: {
-                    'wins': standing['wins'],
-                    'losses': standing['losses'],
-                    'home_record': standing['home_record'],
-                    'road_record': standing['road_record']
-                }
-                for standing in standings_data
-            }
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, params=params, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                
+                # Convert list to dictionary with team_id as key
+                standings_dict = {}
+                for team in data.get('data', []):
+                    standings_dict[team['team']['id']] = {
+                        'wins': team.get('wins', 0),
+                        'losses': team.get('losses', 0),
+                        'conference': team.get('conference', 'N/A'),
+                        'conference_rank': team.get('conference_rank', 'N/A'),
+                        'home_record': f"{team.get('home_wins', 0)}-{team.get('home_losses', 0)}",
+                        'road_record': f"{team.get('road_wins', 0)}-{team.get('road_losses', 0)}",
+                        'last_ten': f"{team.get('last_ten_wins', 0)}-{team.get('last_ten_losses', 0)}",
+                        'streak': f"{'W' if team.get('streak_type') == 'win' else 'L'}{team.get('streak', 0)}"
+                    }
+                return standings_dict
+                
         except Exception as e:
             logger.error(f"Error fetching standings: {str(e)}")
             return {}
@@ -160,100 +292,111 @@ class NBAPredictor:
             logger.error(f"Error fetching betting odds: {str(e)}")
             return []
 
-    def _generate_prediction(self, home_team: Dict, away_team: Dict, 
-                           standings: Dict, home_injuries: List, away_injuries: List,
-                           odds_data: List = None) -> str:
-        """Generate prediction with betting odds"""
-        # Basic prediction logic
-        home_standing = standings.get(home_team['id'], {})
-        away_standing = standings.get(away_team['id'], {})
+    def _parse_odds_data(self, odds_data: List[Dict]) -> Dict:
+        """Parse odds data to get spread and over/under."""
+        if not odds_data:
+            return {}
         
-        # Calculate win probability based on records
-        home_wins = home_standing.get('wins', 0)
-        home_losses = home_standing.get('losses', 0)
-        away_wins = away_standing.get('wins', 0)
-        away_losses = away_standing.get('losses', 0)
+        parsed_odds = {
+            'spread': None,
+            'over_under': None
+        }
         
-        # Determine winner and probability
-        home_win_pct = home_wins / (home_wins + home_losses) if (home_wins + home_losses) > 0 else 0.5
-        away_win_pct = away_wins / (away_wins + away_losses) if (away_wins + away_losses) > 0 else 0.5
+        for odds in odds_data:
+            if odds.get('type') == 'spread' and odds.get('live'):
+                parsed_odds['spread'] = odds.get('away_spread')
+            elif odds.get('type') == 'over/under' and odds.get('live'):
+                parsed_odds['over_under'] = odds.get('over_under')
         
-        if home_win_pct > away_win_pct:
-            winner = home_team['full_name']
-            probability = int(home_win_pct * 100)
-        else:
-            winner = away_team['full_name']
-            probability = int(away_win_pct * 100)
-        
-        # Generate analysis
-        reasoning = (
-            f"The {winner} have a better overall record at "
-            f"{home_wins if winner == home_team['full_name'] else away_wins}-"
-            f"{home_losses if winner == home_team['full_name'] else away_losses}. "
-            f"The {home_team['full_name']} are {len(home_injuries)} players down, while "
-            f"the {away_team['full_name']} have {len(away_injuries)} players out."
-        )
-        
-        # Determine confidence
-        confidence = "High" if abs(home_win_pct - away_win_pct) > 0.2 else "Medium"
-        
-        # Format betting lines
-        betting_lines = "\n\nBetting Lines:"
-        if odds_data:
-            latest_spread = None
-            latest_over_under = None
+        return parsed_odds
+
+    async def _generate_prediction(self, home_team: Dict, away_team: Dict, 
+                                 standings: Dict, home_injuries: List, away_injuries: List,
+                                 odds_data: List = None) -> str:
+        """Generate prediction with consistent format."""
+        try:
+            # Analysis prompt for more detailed but focused analysis
+            analysis_prompt = f"""
+            Analyze this NBA matchup between {away_team['full_name']} and {home_team['full_name']}. 
+            Consider their records, injuries, and recent performance.
+
+            Provide your response in exactly this format:
+            Winner: [Team Name] ([Win Probability]%)
+            Analysis: 3-4 sentences analyzing key factors including records, matchup advantages, and injury impact
+            Confidence: High/Medium/Low
+
+            Current records:
+            {away_team['full_name']}: {standings.get(away_team['id'], {}).get('wins', 0)}-{standings.get(away_team['id'], {}).get('losses', 0)}
+            {home_team['full_name']}: {standings.get(home_team['id'], {}).get('wins', 0)}-{standings.get(home_team['id'], {}).get('losses', 0)}
+            Injuries: {home_team['full_name']} ({len(home_injuries)} players out), {away_team['full_name']} ({len(away_injuries)} players out)
+            """
+
+            response = await asyncio.to_thread(
+                self.openai_client.chat.completions.create,
+                model="gpt-4-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are an expert NBA analyst. Provide predictions in the exact format requested."},
+                    {"role": "user", "content": analysis_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=200
+            )
             
-            # Add logging to debug odds data
-            logger.info(f"Processing odds data for {away_team['full_name']} @ {home_team['full_name']}")
-            logger.info(f"Odds data: {odds_data}")
+            ai_analysis = response.choices[0].message.content.strip()
             
-            for odds in odds_data:
-                if not odds:
-                    continue
+            # Format the prediction
+            prediction = f"🏀 {away_team['full_name']} (Away) @ {home_team['full_name']} (Home)\n\n"
+            
+            # Split the AI response into components
+            lines = ai_analysis.split('\n')
+            winner_line = next((line for line in lines if line.startswith('Winner:')), '')
+            analysis_line = next((line for line in lines if line.startswith('Analysis:')), '')
+            confidence_line = next((line for line in lines if line.startswith('Confidence:')), '')
+            
+            prediction += f"{winner_line}\n"
+            prediction += f"{analysis_line}\n"
+            prediction += f"{confidence_line}\n"
+            
+            # Format betting lines
+            betting_lines = "\nBetting Lines:"  # Note: only one newline here
+            if odds_data:
+                latest_spread = None
+                latest_over_under = None
                 
-                if odds.get('type') == 'spread':
-                    if not latest_spread or odds.get('last_update', '') > latest_spread.get('last_update', ''):
-                        latest_spread = odds
-                elif odds.get('type') == 'over/under':
-                    if not latest_over_under or odds.get('last_update', '') > latest_over_under.get('last_update', ''):
-                        latest_over_under = odds
+                for odds in odds_data:
+                    if not odds:
+                        continue
+                    
+                    if odds.get('type') == 'spread':
+                        if not latest_spread or odds.get('last_update', '') > latest_spread.get('last_update', ''):
+                            latest_spread = odds
+                    elif odds.get('type') == 'over/under':
+                        if not latest_over_under or odds.get('last_update', '') > latest_over_under.get('last_update', ''):
+                            latest_over_under = odds
 
-            # Add error handling and logging for spread
-            if latest_spread:
-                try:
-                    away_spread = latest_spread.get('away_spread')
-                    if away_spread is not None:
-                        spread_value = float(away_spread)
-                        betting_lines += f"\n📊 {away_team['full_name']} {spread_value:+.1f}"
-                    else:
-                        logger.warning(f"No away_spread found in latest_spread: {latest_spread}")
-                except (ValueError, TypeError) as e:
-                    logger.error(f"Error processing spread: {str(e)}")
-                    logger.error(f"Latest spread data: {latest_spread}")
+                if latest_spread:
+                    try:
+                        away_spread = latest_spread.get('away_spread')
+                        if away_spread is not None:
+                            betting_lines += f"\n{away_team['full_name']} {away_spread}"
+                    except (ValueError, TypeError) as e:
+                        logger.error(f"Error processing spread: {str(e)}")
 
-            # Add error handling and logging for over/under
-            if latest_over_under:
-                try:
-                    total = latest_over_under.get('over_under')
-                    if total is not None:
-                        total_value = float(total)
-                        betting_lines += f"\n📈 O {total_value:.1f}"
-                    else:
-                        logger.warning(f"No over_under found in latest_over_under: {latest_over_under}")
-                except (ValueError, TypeError) as e:
-                    logger.error(f"Error processing over/under: {str(e)}")
-                    logger.error(f"Latest over/under data: {latest_over_under}")
+                if latest_over_under:
+                    try:
+                        total = latest_over_under.get('over_under')
+                        if total is not None:
+                            betting_lines += f"\nO {total}"
+                    except (ValueError, TypeError) as e:
+                        logger.error(f"Error processing over/under: {str(e)}")
+            
+            prediction += betting_lines
+            
+            return prediction
 
-        # Construct final prediction
-        prediction = f"""🏀 {away_team['full_name']} (Away) @ {home_team['full_name']} (Home)
-
-Winner: {winner} ({probability}%)
-
-Analysis: {reasoning}
-
-Confidence: {confidence}{betting_lines}"""
-
-        return prediction
+        except Exception as e:
+            logger.error(f"Error generating prediction: {str(e)}")
+            raise
 
     def _analyze_over_under(self, total: float, home_team: Dict, away_team: Dict, standings: Dict) -> str:
         """Analyze over/under based on team statistics"""
@@ -274,51 +417,41 @@ Confidence: {confidence}{betting_lines}"""
             return "Unable to analyze over/under"
 
     async def analyze_matchup(self, game: Dict) -> Dict:
-        """Analyze matchup and generate prediction"""
+        """Analyze a matchup and generate prediction."""
         try:
-            home_team = game['home_team']
-            away_team = game['visitor_team']
+            # Get current season
+            current_season = self._get_current_nba_season()
             
-            tasks = [
-                self.get_team_injuries(home_team['id']),
-                self.get_team_injuries(away_team['id']),
-                self.get_standings(2024)
-            ]
+            # Get additional data needed for analysis
+            home_injuries = await self.get_team_injuries(game['home_team']['id'])
+            away_injuries = await self.get_team_injuries(game['visitor_team']['id'])
+            standings = await self.get_standings(current_season)
             
-            results = await asyncio.gather(*tasks)
-            home_injuries, away_injuries, standings = results
-
-            # Get betting odds
+            # Get odds data for the game
             odds_data = await self.get_betting_odds(game_id=game['id'])
             
-            # Generate prediction with odds
-            prediction = self._generate_prediction(
-                home_team, 
-                away_team,
+            # Generate prediction
+            prediction = await self._generate_prediction(
+                game['home_team'],
+                game['visitor_team'],
                 standings,
                 home_injuries,
                 away_injuries,
                 odds_data
             )
-
+            
             return {
-                "matchup": f"{away_team['full_name']} (Away) @ {home_team['full_name']} (Home)",
+                "matchup": f"{game['visitor_team']['full_name']} @ {game['home_team']['full_name']}",
                 "prediction": prediction,
                 "data": {
-                    "teams": {
-                        "away": {
-                            "name": away_team['full_name'],
-                            "record": f"{standings.get(away_team['id'], {}).get('wins', 0)}-{standings.get(away_team['id'], {}).get('losses', 0)}",
-                            "road_record": standings.get(away_team['id'], {}).get('road_record'),
-                            "injuries": len(away_injuries)
-                        },
-                        "home": {
-                            "name": home_team['full_name'],
-                            "record": f"{standings.get(home_team['id'], {}).get('wins', 0)}-{standings.get(home_team['id'], {}).get('losses', 0)}",
-                            "home_record": standings.get(home_team['id'], {}).get('home_record'),
-                            "injuries": len(home_injuries)
-                        }
-                    }
+                    "home_team": game['home_team'],
+                    "away_team": game['visitor_team'],
+                    "standings": standings,
+                    "injuries": {
+                        "home": home_injuries,
+                        "away": away_injuries
+                    },
+                    "odds": odds_data
                 }
             }
         except Exception as e:
@@ -342,27 +475,47 @@ Confidence: {confidence}{betting_lines}"""
             elif 'today' in query_lower or 'tonight' in query_lower:
                 target_date = current_date
             else:
-                # Try to parse any other date format
-                parsed_date = dateparser.parse(
-                    query,
-                    settings={
-                        'TIMEZONE': 'US/Eastern',
-                        'RETURN_AS_TIMEZONE_AWARE': True
-                    }
-                )
-                if parsed_date:
-                    target_date = parsed_date
+                # Convert common date formats to standard format
+                # First, try to find date patterns in the query
+                date_pattern = r'(?i)(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\s+\d{1,2}'
+                match = re.search(date_pattern, query_lower)
+                
+                if match:
+                    date_str = match.group(0)
+                    # Try to parse the extracted date
+                    parsed_date = dateparser.parse(
+                        date_str,
+                        settings={
+                            'TIMEZONE': 'US/Eastern',
+                            'RETURN_AS_TIMEZONE_AWARE': True,
+                            'PREFER_DATES_FROM': 'future'
+                        }
+                    )
+                    if parsed_date:
+                        target_date = parsed_date
+                    else:
+                        raise ValueError(f"Could not parse date from: {date_str}")
                 else:
-                    # Default to current date if no date specified
-                    target_date = current_date
+                    # If no date pattern found, try parsing the entire query
+                    parsed_date = dateparser.parse(
+                        query_lower,
+                        settings={
+                            'TIMEZONE': 'US/Eastern',
+                            'RETURN_AS_TIMEZONE_AWARE': True,
+                            'PREFER_DATES_FROM': 'future'
+                        }
+                    )
+                    if parsed_date:
+                        target_date = parsed_date
+                    else:
+                        raise ValueError(f"Could not parse date from query: {query}")
             
             # Format the date in YYYY-MM-DD
             return target_date.strftime('%Y-%m-%d')
             
         except Exception as e:
             logger.error(f"Error parsing date from query: {str(e)}")
-            # Default to today's date if parsing fails
-            return datetime.now(est_tz).strftime('%Y-%m-%d')
+            raise ValueError(f"Unable to determine game date from query. Please specify a date like 'Jan 29' or 'January 29'")
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)) -> bool:
     """Verify the bearer token against environment variable."""
@@ -430,7 +583,19 @@ async def nba_agent(
         )
 
         predictor = NBAPredictor()
-        game_date = await predictor.parse_game_date(request.query)
+        try:
+            game_date = await predictor.parse_game_date(request.query)
+        except ValueError as e:
+            # Handle date parsing error
+            agent_response = str(e)
+            await store_message(
+                session_id=request.session_id,
+                message_type="ai",
+                content=agent_response,
+                data={"request_id": request.request_id}
+            )
+            return AgentResponse(success=True)
+
         logger.info(f"Parsed date for games: {game_date}")
         
         games = await predictor.get_games(game_date)
