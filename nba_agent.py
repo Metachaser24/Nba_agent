@@ -17,6 +17,7 @@ import dateparser
 import httpx
 import re
 from fastapi.responses import HTMLResponse
+import pytz
 
 # At the top of the file, after imports
 logging.basicConfig(level=logging.INFO)
@@ -325,46 +326,43 @@ Confidence: {confidence}{betting_lines}"""
             raise
 
     async def parse_game_date(self, query: str) -> str:
-        """Parse date from query and return in YYYY-MM-DD format"""
-        query_lower = query.lower()
-        
+        """Parse date from query with timezone handling."""
         try:
-            # Handle specific date mentions like "Jan 27" or "January 27"
-            if any(month in query_lower for month in ['jan', 'january']):
-                # Extract the date using a more specific pattern
-                date_pattern = r'jan(?:uary)?\s+(\d{1,2})'
-                match = re.search(date_pattern, query_lower)
-                if match:
-                    day = int(match.group(1))
-                    # Use current year, but handle year boundary cases
-                    current_date = datetime.now()
-                    year = current_date.year
-                    # If the specified date is earlier than today and we're in a new year,
-                    # assume it's for the next year
-                    if current_date.month == 1 and day < current_date.day:
-                        year += 1
-                    return f"{year}-01-{day:02d}"
-
+            query_lower = query.lower()
+            
+            # Get current time in EST/ET (NBA's timezone)
+            est_tz = pytz.timezone('US/Eastern')
+            current_date = datetime.now(est_tz)
+            
             # Handle relative dates
             if 'tomorrow' in query_lower:
-                return (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                target_date = current_date + timedelta(days=1)
             elif 'yesterday' in query_lower:
-                return (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+                target_date = current_date - timedelta(days=1)
             elif 'today' in query_lower or 'tonight' in query_lower:
-                return datetime.now().strftime('%Y-%m-%d')
+                target_date = current_date
+            else:
+                # Try to parse any other date format
+                parsed_date = dateparser.parse(
+                    query,
+                    settings={
+                        'TIMEZONE': 'US/Eastern',
+                        'RETURN_AS_TIMEZONE_AWARE': True
+                    }
+                )
+                if parsed_date:
+                    target_date = parsed_date
+                else:
+                    # Default to current date if no date specified
+                    target_date = current_date
             
-            # Try to parse any other date format
-            parsed_date = dateparser.parse(query)
-            if parsed_date:
-                return parsed_date.strftime('%Y-%m-%d')
-            
-            # Default to today if no date is specified
-            return datetime.now().strftime('%Y-%m-%d')
+            # Format the date in YYYY-MM-DD
+            return target_date.strftime('%Y-%m-%d')
             
         except Exception as e:
             logger.error(f"Error parsing date from query: {str(e)}")
             # Default to today's date if parsing fails
-            return datetime.now().strftime('%Y-%m-%d')
+            return datetime.now(est_tz).strftime('%Y-%m-%d')
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)) -> bool:
     """Verify the bearer token against environment variable."""
