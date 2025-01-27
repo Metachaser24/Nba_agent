@@ -79,9 +79,9 @@ class NBAPredictor:
     def _get_current_nba_season(self) -> int:
         """
         Get the NBA season based on the game date.
-        For the 2023-24 season, use 2023.
+        For the 2024-25 season, use 2024.
         """
-        return 2023  # Hardcode to 2023 for now since that's what the API expects
+        return 2024  # Hardcode to 2024 for now since that's what the API expects
 
     async def _is_notable_player(self, player: Dict) -> bool:
         """Determine if a player is notable based on various factors."""
@@ -145,7 +145,7 @@ class NBAPredictor:
     async def _get_team_standings(self, player_id: int) -> Dict:
         """Get current team standings."""
         url = f"{self.base_url}/standings"
-        params = {"season": 2023}
+        params = {"season": 2024}
         headers = {"Authorization": self.api_key}
         
         try:
@@ -232,7 +232,7 @@ class NBAPredictor:
             logger.error(f"Error fetching injuries: {str(e)}")
             return []
 
-    async def get_standings(self, season: int = 2023) -> Dict:
+    async def get_standings(self, season: int = 2024) -> Dict:
         """Get current standings."""
         url = f"{self.base_url}/standings"
         params = {"season": season}
